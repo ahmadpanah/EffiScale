@@ -102,7 +102,7 @@ This will start:
 
 ### Using Docker Compose (Recommended)
 
-1. Build and start services:
+Build and start services:
 ```bash
 # Build the images
 docker-compose build
