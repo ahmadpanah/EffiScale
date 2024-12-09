@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  effiscale:
+    build: .
+    container_name: effiscale
+    ports:
+      - "8001:8001"  # Monitor Service
+      - "8002:8002"  # Controller Service
+      - "8003:8003"  # Execution Service
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./logs:/var/log/effiscale
+    environment:
+      - DOCKER_HOST=unix:///var/run/docker.sock
+      - LOG_LEVEL=INFO
+    restart: unless-stopped
+    networks:
+      - effiscale-network
+
+networks:
+  effiscale-network:
+    driver: bridge
