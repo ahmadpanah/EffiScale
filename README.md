@@ -86,6 +86,18 @@ cd EffiScale
 pip install -r requirements.txt
 ```
 
+### Usage
+
+```bash
+# Start the EffiScale system
+python main.py
+```
+
+This will start:
+- Monitor Service on port 8001
+- Controller Service on port 8002  
+- Execution Service on port 8003
+
 ## Docker Deployment
 
 ### Using Docker Compose (Recommended)
@@ -103,18 +115,6 @@ docker-compose logs -f
 
 # Stop services
 docker-compose down
-
-### Usage
-
-```bash
-# Start the EffiScale system
-python main.py
-```
-
-This will start:
-- Monitor Service on port 8001
-- Controller Service on port 8002  
-- Execution Service on port 8003
 
 ### API Endpoints
 
