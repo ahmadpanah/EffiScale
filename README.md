@@ -116,6 +116,8 @@ docker-compose logs -f
 # Stop services
 docker-compose down
 
+```
+
 ### API Endpoints
 
 Monitor Service (Port 8001):
