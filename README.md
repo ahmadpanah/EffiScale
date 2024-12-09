@@ -86,6 +86,24 @@ cd EffiScale
 pip install -r requirements.txt
 ```
 
+## Docker Deployment
+
+### Using Docker Compose (Recommended)
+
+1. Build and start services:
+```bash
+# Build the images
+docker-compose build
+
+# Start all services
+docker-compose up -d
+
+# Check logs
+docker-compose logs -f
+
+# Stop services
+docker-compose down
+
 ### Usage
 
 ```bash
