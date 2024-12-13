@@ -1,157 +1,182 @@
-# EffiScale: Orchestrated Elasticity Framework for Cloud-native Container Scaling
+# EffiScale: EffiScale: Orchestrated Elasticity Framework for Cloud-native Container Scaling
+## 🌟 Overview
+EffiScale is a sophisticated, self-adaptive framework for optimizing container scaling in cloud environments. Built on a microservices architecture, it provides intelligent resource management through comprehensive monitoring, analysis, and execution capabilities.
 
-<div align="center">
+## 🏗️ Project Structure
+EffiScale/
+│
+├── src/
+│   ├── core/                  # Core Framework Components
+│   │   ├── config.py         # Configuration Management
+│   │   ├── exceptions.py     # Custom Exceptions
+│   │   └── utils.py         # Utility Functions
+│   │
+│   ├── monitoring/           # Monitoring System
+│   │   ├── collector.py     # Metric Collection
+│   │   ├── metrics.py       # Metric Definitions
+│   │   └── prometheus.py    # Prometheus Integration
+│   │
+│   ├── analysis/            # Analysis Engine
+│   │   ├── pattern_analyzer.py
+│   │   ├── threshold_manager.py
+│   │   ├── workload_predictor.py
+│   │   └── resource_optimizer.py
+│   │
+│   ├── controllers/         # Control System
+│   │   ├── elastic_controller.py
+│   │   ├── decision_maker.py
+│   │   ├── consensus_manager.py
+│   │   └── state_manager.py
+│   │
+│   ├── knowledge/          # Knowledge Base
+│   │   ├── knowledge_base.py
+│   │   ├── knowledge_validator.py
+│   │   └── pattern_library.py
+│   │
+│   ├── execution/          # Execution Engine
+│   │   ├── scaling_executor.py
+│   │   ├── container_manager.py
+│   │   └── rollback_manager.py
+│   │
+│   ├── api/               # API Layer
+│   │   ├── routes.py
+│   │   ├── models.py
+│   │   └── validators.py
+│   │
+│   └── storage/          # Storage Layer
+│       ├── metric_storage.py
+│       └── database.py
 
-[![Python](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
-[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Docker](https://img.shields.io/badge/docker-supported-blue.svg)](https://www.docker.com/)
+## 🚀 Key Components
 
-</div>
+### Core Framework (`src/core/`)
+- Configuration management and system bootstrapping
+- Exception handling and error management
+- Utility functions and common operations
 
-EffiScale is a self-adaptive framework designed to optimize both vertical and horizontal container scaling within cloud infrastructure. It employs a decentralized microservice architecture based on IBM's MAPE-K reference model to provide intelligent and efficient container elasticity management.
+### Monitoring System (`src/monitoring/`)
+- Real-time metric collection with Prometheus integration
+- Custom metric definitions and performance monitoring
+- Resource utilization tracking and analysis
 
-## Key Features
+### Analysis Engine (`src/analysis/`)
+- Pattern analysis and detection algorithms
+- Dynamic threshold management and adjustment
+- Workload prediction and resource optimization
 
-- **Decentralized Microservice Architecture**
-  - Independent scaling components 
-  - Fault-tolerant design
-  - Eliminates single points of failure
-  - Enables localized decision-making
+### Control System (`src/controllers/`)
+- Elastic scaling control mechanisms
+- Intelligent decision making logic
+- Consensus and state management
 
-- **Hybrid Scaling Capabilities**
-  - Seamless vertical & horizontal scaling
-  - Dynamic resource adjustment
-  - Container instance management
-  - Fine-grained elasticity control
+### Knowledge Base (`src/knowledge/`)
+- Pattern storage and retrieval systems
+- Knowledge validation and verification
+- Pattern library management and updates
 
-- **Adaptive Thresholds**
-  - Dynamic threshold adjustment
-  - Real-time adaptation
-  - Historical trend analysis
-  - Precise scaling decisions
+### Execution Engine (`src/execution/`)
+- Scaling action execution and coordination
+- Container lifecycle management
+- Rollback mechanism implementation
 
-- **Enhanced Fault Tolerance**
-  - Decentralized controllers
-  - Automatic failover
-  - Self-healing capabilities
-  - High availability
+### API Layer (`src/api/`)
+- RESTful API endpoints
+- Data models and schemas
+- Request/response validation
 
-## Architecture
+### Storage Layer (`src/storage/`)
+- Metric data persistence
+- Database operations and management
 
-The framework consists of four main components:
+## 🛠️ Installation
 
-1. **Monitor Service** (`src/microservices/monitor_service.py`)
-   - Resource utilization tracking
-   - Metric collection
-   - Performance monitoring
-   - Real-time analytics
+    git clone https://github.com/ahmadpanah/EffiScale.git
+    pip install -r requirements.txt
+    docker-compose -f docker/docker-compose.yml build
 
-2. **Controller Service** (`src/microservices/controller_service.py`) 
-   - Scaling decisions
-   - Load balancing
-   - Resource optimization
-   - Federation management
+## 📋 Basic Usage
 
-3. **Decision Maker** (`src/controllers/decision_maker.py`)
-   - Intelligent scaling logic
-   - Predictive analytics
-   - Pattern recognition
-   - Adaptive learning
+    from effiscale.core import EffiScale
 
-4. **Execution Service** (`src/microservices/execution_service.py`)
-   - Scaling action execution
-   - Container management
-   - Resource allocation
-   - State verification
+    # Initialize and start EffiScale
+    effiscale = EffiScale(config_path="config.yaml")
+    effiscale.start()
 
-## Quick Start
+## ⚙️ Configuration Example
 
-### Prerequisites
+    monitoring:
+      collector:
+        interval: 10
+        metrics: [cpu_usage, memory_usage, network_io]
+    analysis:
+      thresholds:
+        cpu: 80
+        memory: 75
+      prediction:
+        window: 300
+        algorithm: "lstm"
+    execution:
+      scaling:
+        min_instances: 1
+        max_instances: 10
+        cooldown: 300
 
-- Python 3.8+
-- Docker
-- FastAPI
-- uvicorn
+## 🚢 Docker Commands
 
-### Installation
+    docker-compose -f docker/docker-compose.yml up -d
+    docker-compose -f docker/docker-compose.yml ps
+    docker-compose -f docker/docker-compose.yml logs -f
 
-```bash
-# Clone the repository
-git clone https://github.com/ahmadpanah/EffiScale.git
+## 🔌 API Endpoints
 
-# Navigate to project directory 
-cd EffiScale
+- Monitoring
+  - `GET /api/v1/metrics` - Get system metrics
+  - `GET /api/v1/status` - Get system status
+- Control
+  - `POST /api/v1/scale` - Trigger scaling
+  - `GET /api/v1/decisions` - Get scaling decisions
+- Analysis
+  - `GET /api/v1/patterns` - Get scaling patterns
+  - `POST /api/v1/patterns` - Create new pattern
 
-# Install dependencies
-pip install -r requirements.txt
-```
+## 📊 Key Features
 
-### Usage
+- Intelligent Scaling
+  - Predictive scaling capabilities
+  - Pattern-based decision making
+  - Resource optimization
+  - Workload analysis
+- High Availability
+  - Fault tolerance mechanisms
+  - Automatic recovery procedures
+  - State persistence
+  - Rollback capabilities
+- Monitoring & Analytics
+  - Real-time metric tracking
+  - Historical data analysis
+  - Pattern recognition
+  - Performance monitoring
 
-```bash
-# Start the EffiScale system
-python main.py
-```
 
-This will start:
-- Monitor Service on port 8001
-- Controller Service on port 8002  
-- Execution Service on port 8003
+## 📝 Documentation
+- Implementation guides: `/examples`
 
-## Docker Deployment
+## 🤝 Contributing
+1. Fork repository
+2. Create feature branch
+3. Commit changes
+4. Push to branch
+5. Create Pull Request
 
-### Using Docker Compose (Recommended)
+## 📄 License
+MIT License - see [LICENSE](LICENSE)
 
-Build and start services:
-```bash
-# Build the images
-docker-compose build
-
-# Start all services
-docker-compose up -d
-
-# Check logs
-docker-compose logs -f
-
-# Stop services
-docker-compose down
-
-```
-
-### API Endpoints
-
-Monitor Service (Port 8001):
-```bash
-GET /metrics/{container_id}        # Get container metrics
-POST /monitor/start/{container_id} # Start monitoring container
-POST /monitor/stop/{container_id}  # Stop monitoring container
-```
-
-Controller Service (Port 8002):
-```bash
-POST /decision                     # Make scaling decision
-GET /health                       # Check controller health
-POST /register                    # Register new controller
-```
-
-Execution Service (Port 8003):
-```bash
-POST /scale/vertical              # Execute vertical scaling
-POST /scale/horizontal           # Execute horizontal scaling
-GET /history/{container_id}      # Get scaling history
-```
-
-## Contributing
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-## License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+## 🔄 Roadmap
+- [ ] Machine Learning Integration
+- [ ] Custom Metric Support
+- [ ] Multi-cluster Management
+- [ ] Advanced Analytics Dashboard
+- [ ] Auto-tuning Capabilities
 
 ## Contact
 
