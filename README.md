@@ -3,49 +3,42 @@
 EffiScale is a sophisticated, self-adaptive framework for optimizing container scaling in cloud environments. Built on a microservices architecture, it provides intelligent resource management through comprehensive monitoring, analysis, and execution capabilities.
 
 ## 🏗️ Project Structure
-EffiScale/
-│
-├── src/
-│   ├── core/                  # Core Framework Components
-│   │   ├── config.py         # Configuration Management
-│   │   ├── exceptions.py     # Custom Exceptions
-│   │   └── utils.py         # Utility Functions
-│   │
-│   ├── monitoring/           # Monitoring System
-│   │   ├── collector.py     # Metric Collection
-│   │   ├── metrics.py       # Metric Definitions
-│   │   └── prometheus.py    # Prometheus Integration
-│   │
-│   ├── analysis/            # Analysis Engine
-│   │   ├── pattern_analyzer.py
-│   │   ├── threshold_manager.py
-│   │   ├── workload_predictor.py
-│   │   └── resource_optimizer.py
-│   │
-│   ├── controllers/         # Control System
-│   │   ├── elastic_controller.py
-│   │   ├── decision_maker.py
-│   │   ├── consensus_manager.py
-│   │   └── state_manager.py
-│   │
-│   ├── knowledge/          # Knowledge Base
-│   │   ├── knowledge_base.py
-│   │   ├── knowledge_validator.py
-│   │   └── pattern_library.py
-│   │
-│   ├── execution/          # Execution Engine
-│   │   ├── scaling_executor.py
-│   │   ├── container_manager.py
-│   │   └── rollback_manager.py
-│   │
-│   ├── api/               # API Layer
-│   │   ├── routes.py
-│   │   ├── models.py
-│   │   └── validators.py
-│   │
-│   └── storage/          # Storage Layer
-│       ├── metric_storage.py
-│       └── database.py
+
+- EffiScale/
+  - src/
+    - core/ *(Core Framework Components)*
+      - config.py *(Configuration Management)*
+      - exceptions.py *(Custom Exceptions)*
+      - utils.py *(Utility Functions)*
+    - monitoring/ *(Monitoring System)*
+      - collector.py *(Metric Collection)*
+      - metrics.py *(Metric Definitions)*
+      - prometheus.py *(Prometheus Integration)*
+    - analysis/ *(Analysis Engine)*
+      - pattern_analyzer.py
+      - threshold_manager.py
+      - workload_predictor.py
+      - resource_optimizer.py
+    - controllers/ *(Control System)*
+      - elastic_controller.py
+      - decision_maker.py
+      - consensus_manager.py
+      - state_manager.py
+    - knowledge/ *(Knowledge Base)*
+      - knowledge_base.py
+      - knowledge_validator.py
+      - pattern_library.py
+    - execution/ *(Execution Engine)*
+      - scaling_executor.py
+      - container_manager.py
+      - rollback_manager.py
+    - api/ *(API Layer)*
+      - routes.py
+      - models.py
+      - validators.py
+    - storage/ *(Storage Layer)*
+      - metric_storage.py
+      - database.py
 
 ## 🚀 Key Components
 
