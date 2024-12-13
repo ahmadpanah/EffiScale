@@ -1,305 +1,819 @@
-# src/controllers/decision_maker.py
-
-from typing import Dict, List, Any, Tuple
-import numpy as np
+from typing import Dict, List, Optional, Tuple, Union
 from datetime import datetime, timedelta
-from enum import Enum
-import logging
 from dataclasses import dataclass
+import numpy as np
+import asyncio
+import logging
+from enum import Enum
+import json
+from scipy.stats import norm
 
-class ScalingDecision(Enum):
-    VERTICAL_SCALE_UP = "vertical_scale_up"
-    VERTICAL_SCALE_DOWN = "vertical_scale_down"
-    HORIZONTAL_SCALE_OUT = "horizontal_scale_out"
-    HORIZONTAL_SCALE_IN = "horizontal_scale_in"
+class DecisionType(Enum):
+    """Types of scaling decisions."""
+    SCALE_HORIZONTAL = "scale_horizontal"
+    SCALE_VERTICAL = "scale_vertical"
+    OPTIMIZE_RESOURCES = "optimize_resources"
     NO_ACTION = "no_action"
+    ROLLBACK = "rollback"
+
+class DecisionConfidence(Enum):
+    """Confidence levels for decisions."""
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+    UNCERTAIN = "uncertain"
 
 @dataclass
-class ResourceThresholds:
-    cpu_high: float
-    cpu_low: float
-    memory_high: float
-    memory_low: float
-    network_high: float
-    network_low: float
+class ScalingDecision:
+    """Container for scaling decisions."""
+    decision_type: DecisionType
+    action: str
+    magnitude: float
+    confidence: DecisionConfidence
+    reason: str
+    metadata: Dict
+    timestamp: datetime
+    impact_assessment: Dict
+    recommendations: List[str]
 
 class DecisionMaker:
-    def __init__(self, learning_rate: float = 0.1):
-        self.learning_rate = learning_rate
-        self.historical_decisions: List[Dict[str, Any]] = []
-        self.thresholds = ResourceThresholds(
-            cpu_high=0.8,
-            cpu_low=0.2,
-            memory_high=0.8,
-            memory_low=0.2,
-            network_high=0.8,
-            network_low=0.2
-        )
-        self.logger = self._setup_logger()
-        self.scaling_cooldown = 300  # 5 minutes
-        self.last_scaling_time: Dict[str, datetime] = {}
-
-    def _setup_logger(self) -> logging.Logger:
-        logger = logging.getLogger("DecisionMaker")
-        logger.setLevel(logging.INFO)
-        handler = logging.StreamHandler()
-        formatter = logging.Formatter(
-            '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-        )
-        handler.setFormatter(formatter)
-        logger.addHandler(handler)
-        return logger
-
-    async def make_scaling_decision(self, 
-                                  container_id: str, 
-                                  metrics: Dict[str, float], 
-                                  container_history: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Makes intelligent scaling decisions based on multiple inputs including
+    metrics, predictions, optimization results, and historical data.
+    """
+    
+    def __init__(self, config: Dict):
         """
-        Make a scaling decision based on current metrics and historical data
+        Initialize the decision maker.
+        
+        Args:
+            config: Configuration dictionary
+        """
+        self.config = config
+        self.logger = logging.getLogger(__name__)
+        
+        # Initialize components
+        self.min_confidence = config.get('decision', {}).get('min_confidence', 0.7)
+        self.decision_weights = config.get('weights', {})
+        self.performance_targets = config.get('performance', {})
+        
+        # Decision history
+        self.decision_history: List[ScalingDecision] = []
+        self.impact_history: List[Tuple[ScalingDecision, Dict]] = []
+        
+        # State tracking
+        self.current_state = {
+            'metrics': {},
+            'predictions': {},
+            'optimization': {},
+            'incidents': []
+        }
+        
+        # Initialize impact learning
+        self.impact_models = self._initialize_impact_models()
+        
+        # Start background tasks
+        if config.get('auto_learn', {}).get('enabled', True):
+            asyncio.create_task(self._impact_learning_loop())
+
+    async def make_decision(
+        self,
+        current_metrics: Dict[str, float],
+        predicted_workload: Optional[List[float]] = None,
+        optimization_result: Optional[Dict] = None,
+        constraints: Optional[Dict] = None
+    ) -> ScalingDecision:
+        """
+        Make scaling decision based on available information.
+        
+        Args:
+            current_metrics: Current system metrics
+            predicted_workload: Optional workload predictions
+            optimization_result: Optional resource optimization results
+            constraints: Optional operational constraints
+            
+        Returns:
+            Scaling decision
         """
         try:
-            # Check cooldown period
-            if not self._can_scale(container_id):
-                return self._create_decision_response(
-                    ScalingDecision.NO_ACTION,
-                    "Cooling down from previous scaling action"
-                )
-
-            # Update thresholds based on historical data
-            self._update_adaptive_thresholds(container_history)
-
-            # Analyze current metrics and predict trend
-            current_state = self._analyze_current_state(metrics)
-            trend = self._predict_trend(container_history)
-
-            # Make decision based on current state and trend
-            decision = self._decide_scaling_action(current_state, trend)
-
-            # Record decision
-            self._record_decision(container_id, metrics, decision)
-
-            return self._create_decision_response(decision, "Decision based on metrics and trends")
-
-        except Exception as e:
-            self.logger.error(f"Error making scaling decision: {str(e)}")
-            return self._create_decision_response(
-                ScalingDecision.NO_ACTION,
-                f"Error in decision making: {str(e)}"
-            )
-
-    def _can_scale(self, container_id: str) -> bool:
-        """Check if container can be scaled based on cooldown period"""
-        if container_id not in self.last_scaling_time:
-            return True
-
-        time_since_last_scaling = (
-            datetime.now() - self.last_scaling_time[container_id]
-        ).total_seconds()
-        return time_since_last_scaling >= self.scaling_cooldown
-
-    def _analyze_current_state(self, metrics: Dict[str, float]) -> Dict[str, str]:
-        """Analyze current resource utilization state"""
-        state = {}
-        
-        # CPU analysis
-        if metrics.get('cpu_usage', 0) > self.thresholds.cpu_high:
-            state['cpu'] = 'high'
-        elif metrics.get('cpu_usage', 0) < self.thresholds.cpu_low:
-            state['cpu'] = 'low'
-        else:
-            state['cpu'] = 'normal'
-
-        # Memory analysis
-        if metrics.get('memory_usage', 0) > self.thresholds.memory_high:
-            state['memory'] = 'high'
-        elif metrics.get('memory_usage', 0) < self.thresholds.memory_low:
-            state['memory'] = 'low'
-        else:
-            state['memory'] = 'normal'
-
-        # Network analysis
-        if metrics.get('network_usage', 0) > self.thresholds.network_high:
-            state['network'] = 'high'
-        elif metrics.get('network_usage', 0) < self.thresholds.network_low:
-            state['network'] = 'low'
-        else:
-            state['network'] = 'normal'
-
-        return state
-
-    def _predict_trend(self, history: List[Dict[str, Any]]) -> Dict[str, str]:
-        """Predict resource utilization trends based on historical data"""
-        if not history:
-            return {'cpu': 'stable', 'memory': 'stable', 'network': 'stable'}
-
-        recent_history = history[-10:]  # Consider last 10 data points
-        
-        trends = {}
-        for metric in ['cpu_usage', 'memory_usage', 'network_usage']:
-            values = [entry.get('metrics', {}).get(metric, 0) for entry in recent_history]
-            if len(values) < 2:
-                trends[metric.split('_')[0]] = 'stable'
-                continue
-
-            # Calculate trend using linear regression
-            x = np.arange(len(values))
-            slope = np.polyfit(x, values, 1)[0]
+            # Update state
+            self._update_state(current_metrics, predicted_workload, optimization_result)
             
-            if slope > 0.1:
-                trends[metric.split('_')[0]] = 'increasing'
-            elif slope < -0.1:
-                trends[metric.split('_')[0]] = 'decreasing'
-            else:
-                trends[metric.split('_')[0]] = 'stable'
+            # Generate decision candidates
+            candidates = await self._generate_decision_candidates(constraints)
+            
+            # Evaluate candidates
+            evaluated_candidates = await self._evaluate_candidates(candidates)
+            
+            # Select best decision
+            decision = self._select_best_decision(evaluated_candidates)
+            
+            # Record decision
+            self.decision_history.append(decision)
+            
+            # Trim history if needed
+            max_history = self.config.get('max_history_size', 1000)
+            if len(self.decision_history) > max_history:
+                self.decision_history = self.decision_history[-max_history:]
+            
+            return decision
+            
+        except Exception as e:
+            self.logger.error(f"Error making decision: {str(e)}")
+            raise
 
-        return trends
-
-    def _decide_scaling_action(self, 
-                             current_state: Dict[str, str], 
-                             trend: Dict[str, str]) -> ScalingDecision:
-        """Determine appropriate scaling action based on state and trend"""
+    async def _generate_decision_candidates(
+        self,
+        constraints: Optional[Dict]
+    ) -> List[ScalingDecision]:
+        """Generate potential decision candidates."""
+        candidates = []
         
-        # Check for immediate horizontal scaling needs
-        if (current_state['cpu'] == 'high' and trend['cpu'] == 'increasing') or \
-           (current_state['memory'] == 'high' and trend['memory'] == 'increasing'):
-            return ScalingDecision.HORIZONTAL_SCALE_OUT
-
-        if (current_state['cpu'] == 'low' and trend['cpu'] == 'decreasing' and
-            current_state['memory'] == 'low' and trend['memory'] == 'decreasing'):
-            return ScalingDecision.HORIZONTAL_SCALE_IN
-
-        # Check for vertical scaling needs
-        if (current_state['cpu'] == 'high' or current_state['memory'] == 'high') and \
-           (trend['cpu'] == 'stable' or trend['memory'] == 'stable'):
-            return ScalingDecision.VERTICAL_SCALE_UP
-
-        if (current_state['cpu'] == 'low' and current_state['memory'] == 'low') and \
-           (trend['cpu'] == 'stable' and trend['memory'] == 'stable'):
-            return ScalingDecision.VERTICAL_SCALE_DOWN
-
-        return ScalingDecision.NO_ACTION
-
-    def _update_adaptive_thresholds(self, history: List[Dict[str, Any]]) -> None:
-        """Update thresholds based on historical performance"""
-        if not history:
-            return
-
-        recent_history = history[-50:]  # Consider last 50 data points
+        # Get current state
+        metrics = self.current_state['metrics']
+        predictions = self.current_state['predictions']
+        optimization = self.current_state['optimization']
         
-        # Calculate new thresholds based on historical patterns
-        cpu_values = [h.get('metrics', {}).get('cpu_usage', 0) for h in recent_history]
-        memory_values = [h.get('metrics', {}).get('memory_usage', 0) for h in recent_history]
+        # Consider horizontal scaling
+        candidates.extend(await self._generate_horizontal_candidates(
+            metrics,
+            predictions,
+            constraints
+        ))
         
-        if cpu_values:
-            cpu_std = np.std(cpu_values)
-            self.thresholds.cpu_high = min(0.9, 0.8 + cpu_std)
-            self.thresholds.cpu_low = max(0.1, 0.2 - cpu_std)
+        # Consider vertical scaling
+        candidates.extend(await self._generate_vertical_candidates(
+            metrics,
+            optimization,
+            constraints
+        ))
+        
+        # Consider resource optimization
+        candidates.extend(await self._generate_optimization_candidates(
+            metrics,
+            optimization,
+            constraints
+        ))
+        
+        # Always include no-action candidate
+        candidates.append(ScalingDecision(
+            decision_type=DecisionType.NO_ACTION,
+            action="none",
+            magnitude=0.0,
+            confidence=DecisionConfidence.HIGH,
+            reason="No action needed",
+            metadata={},
+            timestamp=datetime.utcnow(),
+            impact_assessment={},
+            recommendations=[]
+        ))
+        
+        return candidates
 
-        if memory_values:
-            memory_std = np.std(memory_values)
-            self.thresholds.memory_high = min(0.9, 0.8 + memory_std)
-            self.thresholds.memory_low = max(0.1, 0.2 - memory_std)
+    async def _generate_horizontal_candidates(
+        self,
+        metrics: Dict[str, float],
+        predictions: Dict,
+        constraints: Optional[Dict]
+    ) -> List[ScalingDecision]:
+        """Generate horizontal scaling candidates."""
+        candidates = []
+        
+        # Get current utilization
+        cpu_util = metrics.get('cpu_usage', 0)
+        memory_util = metrics.get('memory_usage', 0)
+        
+        # Get predictions if available
+        predicted_workload = predictions.get('workload', [])
+        
+        # Scale out candidate
+        if cpu_util > 0.7 or memory_util > 0.7 or \
+           (predicted_workload and max(predicted_workload) > 0.7):
+            
+            candidates.append(ScalingDecision(
+                decision_type=DecisionType.SCALE_HORIZONTAL,
+                action="scale_out",
+                magnitude=self._calculate_scale_out_magnitude(
+                    cpu_util,
+                    memory_util,
+                    predicted_workload
+                ),
+                confidence=self._calculate_confidence(
+                    cpu_util,
+                    memory_util,
+                    predicted_workload
+                ),
+                reason="High resource utilization",
+                metadata={
+                    'cpu_util': cpu_util,
+                    'memory_util': memory_util,
+                    'predicted_max': max(predicted_workload) if predicted_workload else None
+                },
+                timestamp=datetime.utcnow(),
+                impact_assessment=self._predict_scaling_impact(
+                    "scale_out",
+                    metrics
+                ),
+                recommendations=self._generate_recommendations(
+                    "scale_out",
+                    metrics,
+                    predictions
+                )
+            ))
+        
+        # Scale in candidate
+        if cpu_util < 0.3 and memory_util < 0.3 and \
+           (not predicted_workload or max(predicted_workload) < 0.5):
+            
+            candidates.append(ScalingDecision(
+                decision_type=DecisionType.SCALE_HORIZONTAL,
+                action="scale_in",
+                magnitude=self._calculate_scale_in_magnitude(
+                    cpu_util,
+                    memory_util,
+                    predicted_workload
+                ),
+                confidence=self._calculate_confidence(
+                    cpu_util,
+                    memory_util,
+                    predicted_workload
+                ),
+                reason="Low resource utilization",
+                metadata={
+                    'cpu_util': cpu_util,
+                    'memory_util': memory_util,
+                    'predicted_max': max(predicted_workload) if predicted_workload else None
+                },
+                timestamp=datetime.utcnow(),
+                impact_assessment=self._predict_scaling_impact(
+                    "scale_in",
+                    metrics
+                ),
+                recommendations=self._generate_recommendations(
+                    "scale_in",
+                    metrics,
+                    predictions
+                )
+            ))
+        
+        return candidates
 
-    def _record_decision(self, 
-                        container_id: str, 
-                        metrics: Dict[str, float], 
-                        decision: ScalingDecision) -> None:
-        """Record scaling decision for historical analysis"""
-        self.historical_decisions.append({
-            'container_id': container_id,
-            'timestamp': datetime.now().isoformat(),
-            'metrics': metrics,
-            'decision': decision.value
-        })
+    async def _generate_vertical_candidates(
+        self,
+        metrics: Dict[str, float],
+        optimization: Dict,
+        constraints: Optional[Dict]
+    ) -> List[ScalingDecision]:
+        """Generate vertical scaling candidates."""
+        candidates = []
+        
+        if optimization:
+            # Get optimization recommendations
+            target_cpu = optimization.get('cpu_allocation')
+            target_memory = optimization.get('memory_allocation')
+            
+            if target_cpu is not None and target_memory is not None:
+                current_cpu = metrics.get('allocated_cpu', 0)
+                current_memory = metrics.get('allocated_memory', 0)
+                
+                # Scale up candidate
+                if target_cpu > current_cpu * 1.1 or target_memory > current_memory * 1.1:
+                    candidates.append(ScalingDecision(
+                        decision_type=DecisionType.SCALE_VERTICAL,
+                        action="scale_up",
+                        magnitude=max(
+                            target_cpu / current_cpu - 1,
+                            target_memory / current_memory - 1
+                        ),
+                        confidence=DecisionConfidence(optimization.get('confidence', 'MEDIUM')),
+                        reason="Resource optimization recommendation",
+                        metadata={
+                            'target_cpu': target_cpu,
+                            'target_memory': target_memory,
+                            'current_cpu': current_cpu,
+                            'current_memory': current_memory
+                        },
+                        timestamp=datetime.utcnow(),
+                        impact_assessment=self._predict_scaling_impact(
+                            "scale_up",
+                            metrics,
+                            optimization
+                        ),
+                        recommendations=self._generate_recommendations(
+                            "scale_up",
+                            metrics,
+                            optimization=optimization
+                        )
+                    ))
+                
+                # Scale down candidate
+                if target_cpu < current_cpu * 0.9 and target_memory < current_memory * 0.9:
+                    candidates.append(ScalingDecision(
+                        decision_type=DecisionType.SCALE_VERTICAL,
+                        action="scale_down",
+                        magnitude=max(
+                            1 - target_cpu / current_cpu,
+                            1 - target_memory / current_memory
+                        ),
+                        confidence=DecisionConfidence(optimization.get('confidence', 'MEDIUM')),
+                        reason="Resource optimization recommendation",
+                        metadata={
+                            'target_cpu': target_cpu,
+                            'target_memory': target_memory,
+                            'current_cpu': current_cpu,
+                            'current_memory': current_memory
+                        },
+                        timestamp=datetime.utcnow(),
+                        impact_assessment=self._predict_scaling_impact(
+                            "scale_down",
+                            metrics,
+                            optimization
+                        ),
+                        recommendations=self._generate_recommendations(
+                            "scale_down",
+                            metrics,
+                            optimization=optimization
+                        )
+                    ))
+        
+        return candidates
 
-        if decision != ScalingDecision.NO_ACTION:
-            self.last_scaling_time[container_id] = datetime.now()
+    async def _generate_optimization_candidates(
+        self,
+        metrics: Dict[str, float],
+        optimization: Dict,
+        constraints: Optional[Dict]
+    ) -> List[ScalingDecision]:
+        """Generate resource optimization candidates."""
+        candidates = []
+        
+        if optimization and optimization.get('recommendations'):
+            for recommendation in optimization['recommendations']:
+                candidates.append(ScalingDecision(
+                    decision_type=DecisionType.OPTIMIZE_RESOURCES,
+                    action=recommendation['action'],
+                    magnitude=recommendation.get('magnitude', 0.0),
+                    confidence=DecisionConfidence(recommendation.get('confidence', 'MEDIUM')),
+                    reason=recommendation['reason'],
+                    metadata=recommendation.get('metadata', {}),
+                    timestamp=datetime.utcnow(),
+                    impact_assessment=self._predict_scaling_impact(
+                        recommendation['action'],
+                        metrics,
+                        optimization
+                    ),
+                    recommendations=recommendation.get('recommendations', [])
+                ))
+        
+        return candidates
 
-    def _create_decision_response(self, 
-                                decision: ScalingDecision, 
-                                reason: str) -> Dict[str, Any]:
-        """Create formatted decision response"""
-        return {
-            'decision': decision.value,
-            'timestamp': datetime.now().isoformat(),
-            'reason': reason,
-            'thresholds': {
-                'cpu_high': self.thresholds.cpu_high,
-                'cpu_low': self.thresholds.cpu_low,
-                'memory_high': self.thresholds.memory_high,
-                'memory_low': self.thresholds.memory_low,
-                'network_high': self.thresholds.network_high,
-                'network_low': self.thresholds.network_low
-            }
+    async def _evaluate_candidates(
+        self,
+        candidates: List[ScalingDecision]
+    ) -> List[Tuple[ScalingDecision, float]]:
+        """Evaluate decision candidates."""
+        evaluated = []
+        
+        for candidate in candidates:
+            score = await self._calculate_decision_score(candidate)
+            evaluated.append((candidate, score))
+        
+        return evaluated
+
+    async def _calculate_decision_score(
+        self,
+        decision: ScalingDecision
+    ) -> float:
+        """Calculate overall score for a decision."""
+        # Base score from confidence
+        confidence_scores = {
+            DecisionConfidence.HIGH: 1.0,
+            DecisionConfidence.MEDIUM: 0.7,
+            DecisionConfidence.LOW: 0.4,
+            DecisionConfidence.UNCERTAIN: 0.2
         }
+        base_score = confidence_scores[decision.confidence]
+        
+        # Impact score
+        impact_score = self._calculate_impact_score(decision.impact_assessment)
+        
+        # Risk score
+        risk_score = self._calculate_risk_score(decision)
+        
+        # Historical success score
+        history_score = await self._calculate_history_score(decision)
+        
+        # Combine scores using weights
+        weights = self.decision_weights
+        total_score = (
+            weights.get('confidence', 0.3) * base_score +
+            weights.get('impact', 0.3) * impact_score +
+            weights.get('risk', 0.2) * (1 - risk_score) +  # Invert risk score
+            weights.get('history', 0.2) * history_score
+        )
+        
+        return total_score
 
-    def get_decision_history(self, 
-                           container_id: str, 
-                           time_window: int = 3600) -> List[Dict[str, Any]]:
-        """Get decision history for a specific container"""
-        cutoff_time = datetime.now() - timedelta(seconds=time_window)
-        return [
-            decision for decision in self.historical_decisions
-            if (decision['container_id'] == container_id and
-                datetime.fromisoformat(decision['timestamp']) > cutoff_time)
+    def _calculate_impact_score(
+        self,
+        impact_assessment: Dict
+    ) -> float:
+        """Calculate score based on predicted impact."""
+        if not impact_assessment:
+            return 0.5
+        
+        # Consider performance impact
+        perf_impact = impact_assessment.get('performance_impact', 0)
+        cost_impact = impact_assessment.get('cost_impact', 0)
+        resource_impact = impact_assessment.get('resource_efficiency', 0)
+        
+        # Normalize and combine impacts
+        score = (
+            0.4 * (1 + perf_impact) +  # Higher is better
+            0.3 * (1 - cost_impact) +   # Lower is better
+            0.3 * resource_impact       # Higher is better
+        )
+        
+        return max(0, min(1, score))
+
+    def _calculate_risk_score(
+        self,
+        decision: ScalingDecision
+    ) -> float:
+        """Calculate risk score for a decision."""
+        base_risk = {
+            DecisionType.SCALE_HORIZONTAL: 0.3,
+            DecisionType.SCALE_VERTICAL: 0.5,
+            DecisionType.OPTIMIZE_RESOURCES: 0.4,
+            DecisionType.NO_ACTION: 0.1,
+            DecisionType.ROLLBACK: 0.6
+        }[decision.decision_type]
+        
+        # Adjust for magnitude
+        magnitude_factor = min(1, decision.magnitude / 2)
+        
+        # Adjust for confidence
+        confidence_factor = {
+            DecisionConfidence.HIGH: 0.7,
+            DecisionConfidence.MEDIUM: 1.0,
+            DecisionConfidence.LOW: 1.3,
+            DecisionConfidence.UNCERTAIN: 1.5
+        }[decision.confidence]
+        
+        return min(1, base_risk * magnitude_factor * confidence_factor)
+
+    async def _calculate_history_score(
+        self,
+        decision: ScalingDecision
+    ) -> float:
+        """Calculate score based on historical success."""
+        similar_decisions = [
+            d for d in self.decision_history[-100:]  # Last 100 decisions
+            if d.decision_type == decision.decision_type and
+            d.action == decision.action
         ]
-
-    def analyze_decision_effectiveness(self, 
-                                    container_id: str, 
-                                    time_window: int = 3600) -> Dict[str, Any]:
-        """Analyze the effectiveness of past scaling decisions"""
-        decisions = self.get_decision_history(container_id, time_window)
         
-        if not decisions:
-            return {'status': 'No decisions in specified time window'}
+        if not similar_decisions:
+            return 0.5
+        
+        # Calculate success rate from impact history
+        success_count = 0
+        for d in similar_decisions:
+            impacts = [i[1] for i in self.impact_history if i[0] == d]
+            if impacts and self._was_decision_successful(impacts[0]):
+                success_count += 1
+        
+        return success_count / len(similar_decisions)
 
-        analysis = {
-            'total_decisions': len(decisions),
-            'decision_breakdown': {},
-            'average_metrics_before_scaling': {},
-            'average_metrics_after_scaling': {}
+    def _was_decision_successful(
+        self,
+        impact: Dict
+    ) -> bool:
+        """Determine if a decision's impact was successful."""
+        if not impact:
+            return False
+        
+        # Check performance impact
+        perf_success = impact.get('performance_impact', 0) > -0.1
+        
+        # Check cost impact
+        cost_success = impact.get('cost_impact', 0) < 0.2
+        
+        # Check resource efficiency
+        resource_success = impact.get('resource_efficiency', 0) > 0
+        
+        return perf_success and cost_success and resource_success
+
+    def _select_best_decision(
+        self,
+        evaluated_candidates: List[Tuple[ScalingDecision, float]]
+    ) -> ScalingDecision:
+        """Select best decision from candidates."""
+        if not evaluated_candidates:
+            return ScalingDecision(
+                decision_type=DecisionType.NO_ACTION,
+                action="none",
+                magnitude=0.0,
+                confidence=DecisionConfidence.HIGH,
+                reason="No candidates available",
+                metadata={},
+                timestamp=datetime.utcnow(),
+                impact_assessment={},
+                recommendations=[]
+            )
+        
+        # Sort by score
+        sorted_candidates = sorted(
+            evaluated_candidates,
+            key=lambda x: x[1],
+            reverse=True
+        )
+        
+        # Check if best candidate meets minimum confidence
+        best_candidate, best_score = sorted_candidates[0]
+        
+        if best_score < self.min_confidence and \
+           best_candidate.decision_type != DecisionType.NO_ACTION:
+            return ScalingDecision(
+                decision_type=DecisionType.NO_ACTION,
+                action="none",
+                magnitude=0.0,
+                confidence=DecisionConfidence.HIGH,
+                reason="No candidate met minimum confidence threshold",
+                metadata={'best_score': best_score},
+                timestamp=datetime.utcnow(),
+                impact_assessment={},
+                recommendations=[]
+            )
+        
+        return best_candidate
+
+    def _predict_scaling_impact(
+        self,
+        action: str,
+        metrics: Dict[str, float],
+        optimization: Optional[Dict] = None
+    ) -> Dict:
+        """Predict impact of scaling action."""
+        # Get relevant model
+        model = self.impact_models.get(action)
+        if not model:
+            return {}
+        
+        try:
+            # Prepare features
+            features = self._prepare_impact_features(
+                action,
+                metrics,
+                optimization
+            )
+            
+            # Predict impacts
+            impacts = model.predict([features])[0]
+            
+            return {
+                'performance_impact': float(impacts[0]),
+                'cost_impact': float(impacts[1]),
+                'resource_efficiency': float(impacts[2])
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error predicting impact: {str(e)}")
+            return {}
+
+    def _prepare_impact_features(
+        self,
+        action: str,
+        metrics: Dict[str, float],
+        optimization: Optional[Dict]
+    ) -> List[float]:
+        """Prepare features for impact prediction."""
+        features = [
+            metrics.get('cpu_usage', 0),
+            metrics.get('memory_usage', 0),
+            metrics.get('request_rate', 0),
+            metrics.get('error_rate', 0)
+        ]
+        
+        if optimization:
+            features.extend([
+                optimization.get('cpu_allocation', 0),
+                optimization.get('memory_allocation', 0)
+            ])
+        else:
+            features.extend([0, 0])
+        
+        return features
+
+    def _initialize_impact_models(self) -> Dict:
+        """Initialize models for impact prediction."""
+        # This should be replaced with actual ML models
+        return {
+            'scale_out': MockImpactModel(),
+            'scale_in': MockImpactModel(),
+            'scale_up': MockImpactModel(),
+            'scale_down': MockImpactModel()
         }
 
-        # Calculate decision breakdown
-        for decision in decisions:
-            decision_type = decision['decision']
-            analysis['decision_breakdown'][decision_type] = \
-                analysis['decision_breakdown'].get(decision_type, 0) + 1
+    def _generate_recommendations(
+        self,
+        action: str,
+        metrics: Dict[str, float],
+        predictions: Optional[Dict] = None,
+        optimization: Optional[Dict] = None
+    ) -> List[str]:
+        """Generate human-readable recommendations."""
+        recommendations = []
+        
+        if action == "scale_out":
+            recommendations.append(
+                f"Increase number of instances to handle high utilization "
+                f"(CPU: {metrics.get('cpu_usage', 0)*100:.1f}%, "
+                f"Memory: {metrics.get('memory_usage', 0)*100:.1f}%)"
+            )
+            
+            if predictions and predictions.get('workload'):
+                recommendations.append(
+                    f"Prepare for predicted workload increase "
+                    f"(Peak: {max(predictions['workload'])*100:.1f}%)"
+                )
+        
+        elif action == "scale_in":
+            recommendations.append(
+                f"Decrease number of instances to optimize costs "
+                f"(Current utilization - CPU: {metrics.get('cpu_usage', 0)*100:.1f}%, "
+                f"Memory: {metrics.get('memory_usage', 0)*100:.1f}%)"
+            )
+        
+        elif action in ["scale_up", "scale_down"] and optimization:
+            recommendations.append(
+                f"Adjust resource allocation based on optimization analysis "
+                f"(Target CPU: {optimization.get('cpu_allocation', 0):.1f}, "
+                f"Memory: {optimization.get('memory_allocation', 0):.0f}MB)"
+            )
+        
+        return recommendations
 
-        return analysis
+    def _update_state(
+        self,
+        metrics: Dict[str, float],
+        predictions: Optional[Dict] = None,
+        optimization: Optional[Dict] = None
+    ):
+        """Update current state."""
+        self.current_state['metrics'] = metrics
+        if predictions:
+            self.current_state['predictions'] = predictions
+        if optimization:
+            self.current_state['optimization'] = optimization
+
+    async def record_decision_impact(
+        self,
+        decision: ScalingDecision,
+        impact: Dict
+    ):
+        """Record actual impact of a decision."""
+        self.impact_history.append((decision, impact))
+        
+        # Trim history if needed
+        max_history = self.config.get('max_history_size', 1000)
+        if len(self.impact_history) > max_history:
+            self.impact_history = self.impact_history[-max_history:]
+
+    async def _impact_learning_loop(self):
+        """Background task for learning from decision impacts."""
+        while True:
+            try:
+                # Update impact models
+                await self._update_impact_models()
+                
+                # Sleep until next update
+                interval = self.config.get('auto_learn', {}).get('interval', 3600)
+                await asyncio.sleep(interval)
+                
+            except Exception as e:
+                self.logger.error(f"Error in impact learning loop: {str(e)}")
+                await asyncio.sleep(60)
+
+    async def _update_impact_models(self):
+        """Update impact prediction models with new data."""
+        if len(self.impact_history) < self.config.get('min_learning_samples', 50):
+            return
+        
+        # Group impacts by action
+        impacts_by_action = {}
+        for decision, impact in self.impact_history:
+            action = decision.action
+            if action not in impacts_by_action:
+                impacts_by_action[action] = []
+            impacts_by_action[action].append((decision, impact))
+        
+        # Update models
+        for action, impacts in impacts_by_action.items():
+            if action in self.impact_models:
+                X = []  # Features
+                y = []  # Impacts
+                
+                for decision, impact in impacts:
+                    features = self._prepare_impact_features(
+                        action,
+                        decision.metadata,
+                        decision.metadata.get('optimization')
+                    )
+                    X.append(features)
+                    y.append([
+                        impact.get('performance_impact', 0),
+                        impact.get('cost_impact', 0),
+                        impact.get('resource_efficiency', 0)
+                    ])
+                
+                if X and y:
+                    self.impact_models[action].fit(X, y)
+
+class MockImpactModel:
+    """Mock model for impact prediction."""
+    
+    def predict(self, X):
+        """Mock prediction."""
+        return [[0.1, -0.1, 0.2]]
+        
+    def fit(self, X, y):
+        """Mock training."""
+        pass
 
 # Example usage
 if __name__ == "__main__":
-    # Create decision maker instance
-    decision_maker = DecisionMaker()
-
-    # Example metrics
-    metrics = {
-        'cpu_usage': 0.85,
-        'memory_usage': 0.75,
-        'network_usage': 0.60
-    }
-
-    # Example container history
-    container_history = [
-        {
-            'metrics': {
-                'cpu_usage': 0.82,
-                'memory_usage': 0.73,
-                'network_usage': 0.58
-            },
-            'timestamp': '2024-01-01T10:00:00'
+    # Configuration
+    config = {
+        'decision': {
+            'min_confidence': 0.7
         },
-        # Add more historical data points...
-    ]
-
-    # Make scaling decision
-    import asyncio
-    decision = asyncio.run(
-        decision_maker.make_scaling_decision(
-            'container_123',
+        'weights': {
+            'confidence': 0.3,
+            'impact': 0.3,
+            'risk': 0.2,
+            'history': 0.2
+        },
+        'performance': {
+            'target_response_time': 100
+        },
+        'auto_learn': {
+            'enabled': True,
+            'interval': 3600
+        }
+    }
+    
+    # Initialize decision maker
+    decision_maker = DecisionMaker(config)
+    
+    # Example decision making
+    async def main():
+        # Current metrics
+        metrics = {
+            'cpu_usage': 0.8,
+            'memory_usage': 0.7,
+            'response_time': 150,
+            'request_rate': 100,
+            'error_rate': 0.01
+        }
+        
+        # Predictions
+        predictions = {
+            'workload': [0.85, 0.9, 0.82, 0.88]
+        }
+        
+        # Optimization result
+        optimization = {
+            'cpu_allocation': 2.0,
+            'memory_allocation': 4096,
+            'confidence': 'HIGH',
+            'recommendations': [
+                {
+                    'action': 'increase_cpu',
+                    'magnitude': 0.5,
+                    'confidence': 'HIGH',
+                    'reason': 'High CPU utilization'
+                }
+            ]
+        }
+        
+        # Make decision
+        decision = await decision_maker.make_decision(
             metrics,
-            container_history
+            predictions,
+            optimization
         )
-    )
-    print(f"Scaling decision: {decision}")
+        
+        print(f"Decision Type: {decision.decision_type.value}")
+        print(f"Action: {decision.action}")
+        print(f"Magnitude: {decision.magnitude:.2f}")
+        print(f"Confidence: {decision.confidence.value}")
+        print(f"Reason: {decision.reason}")
+        print("Metadata:", json.dumps(decision.metadata, indent=2))
+        print("Impact Assessment:", json.dumps(decision.impact_assessment, indent=2))
+        print("\nRecommendations:")
+        for rec in decision.recommendations:
+            print(f"- {rec}")
+    
+    # Run example
+    asyncio.run(main())
