@@ -165,7 +165,6 @@ EffiScale is a sophisticated, self-adaptive framework for optimizing container s
 MIT License - see [LICENSE](LICENSE)
 
 ## 🔄 Roadmap
-- [ ] Machine Learning Integration
 - [ ] Custom Metric Support
 - [ ] Multi-cluster Management
 - [ ] Advanced Analytics Dashboard
