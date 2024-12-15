@@ -1,4 +1,4 @@
-# EffiScale: EffiScale: Orchestrated Elasticity Framework for Cloud-native Container Scaling
+# EffiScale: Orchestrated Elasticity Framework for Cloud-native Container Scaling
 ## 🌟 Overview
 EffiScale is a sophisticated, self-adaptive framework for optimizing container scaling in cloud environments. Built on a microservices architecture, it provides intelligent resource management through comprehensive monitoring, analysis, and execution capabilities.
 
